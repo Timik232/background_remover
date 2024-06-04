@@ -4,6 +4,21 @@ import numpy as np
 from skimage import measure
 
 
+def preprocess_image(img):
+    # Delete black pixels
+    img[img == 0] = np.nan
+    img = np.nan_to_num(img)
+
+    # Normalize remaining pixels
+    img = (img - np.min(img)) / (np.max(img) - np.min(img))
+
+    # Create YOLO segmentation mask
+    mask = np.zeros_like(img)
+    mask[img > 0] = 1
+
+    return img, mask
+
+
 def mask_to_polygons(mask):
     contours = measure.find_contours(mask, 0.5)
     polygons = []

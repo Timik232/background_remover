@@ -1,3 +1,5 @@
+import os
+from ultralytics import YOLO
 import requests
 from vk_api.utils import get_random_id
 import vk_api
@@ -7,6 +9,9 @@ import time
 import numpy as np
 from skimage import io
 import urllib.request
+import tempfile
+from threading import Thread
+import cv2
 
 
 vk_session = vk_api.VkApi(token=VK_API)
@@ -14,6 +19,14 @@ vk = vk_session.get_api()
 
 
 def send_message(user_id: int, msg: str, stiker=None, attach=None) -> None:
+    """
+    Send message to user
+    :param user_id: user id
+    :param msg: text message
+    :param stiker: id of the sticker in vk
+    :param attach: attachment
+    :return: None
+    """
     try:
         vk.messages.send(
             user_id=user_id,
@@ -27,7 +40,7 @@ def send_message(user_id: int, msg: str, stiker=None, attach=None) -> None:
         return
 
 
-def send_document(user_id, doc_req, message=None):
+def send_document(user_id: int, doc_req, message=None):
     upload = vk.VkUpload(vk_session)
     document = upload.document_message(doc_req)[0]
     print(document)
@@ -44,7 +57,7 @@ def send_document(user_id, doc_req, message=None):
         return
 
 
-def send_photo(user_id, img_req, message=None):
+def send_photo(user_id: int, img_req, message=None):
     upload = vk_api.VkUpload(vk_session)
     photo = upload.photo_messages(img_req)[0]
     owner_id = photo['owner_id']
@@ -61,6 +74,11 @@ def send_photo(user_id, img_req, message=None):
 
 
 def check_attachments(event) -> str:
+    """
+    Check attachments in event, if there is a photo, document or None
+    :param event: vk event
+    :return: string with type of attachment: photo, doc or None
+    """
     # Получаем полную информацию о сообщении по его id
     message = vk.messages.getById(message_ids=event.message_id)['items'][0]
 
@@ -76,7 +94,12 @@ def check_attachments(event) -> str:
 
 
 def transform_photo(img_path: str) -> np.ndarray:
-    img = io.imread(img_path)
+    """
+    Fix image by duplicating axis or deleting alpha channel
+    :param img_path: path to image
+    :return: image in numpy array
+    """
+    img = cv2.imread(img_path)
     if img.shape[2] == 2:
         img = img[:, :, None]
         img = np.repeat(img, 3, axis=2)
@@ -88,11 +111,51 @@ def transform_photo(img_path: str) -> np.ndarray:
     if img.shape[2] == 4:
         image = img[:, :, :3]
         print("removed alpha channel")
-
     return img
 
 
+def save_image_from_url(image_url: str, file_name: str):
+    """
+    Save image from url
+    :param image_url: url of the image
+    :param file_name: name of the file
+    :return: None
+    """
+    urllib.request.urlretrieve(image_url, file_name)
+    print(F'File "{file_name}" was saved to temporary')
+
+
+def remove_background(user_id: int, model: YOLO, image_path: str, temp_dir) -> None:
+    import matplotlib.pyplot as plt
+    image = transform_photo(image_path)
+    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    path = ""
+    results = model(image_rgb)
+    print(results[0].masks.xyn)
+    mask = results[0].masks[0]  # Если у вас несколько каналов, выберите нужный
+
+    # Преобразование тензора в массив numpy для визуализации
+    mask_np = mask.numpy()
+
+    # Визуализация маски
+    plt.imshow(mask_np, cmap='gray')  # Используйте cmap='gray' для отображения в градациях серого
+    plt.axis('off')  # Отключение осей для чистого изображения
+    plt.show()
+
+            # cv2.imwrite(mask_filename, obj_mask)
+            # path = os.path.join(temp_dir, f"{user_id}_{i}.png")
+            # cv2.imwrite(path, segmented_image)
+            # cv2.waitKey(0)
+            # cv2.destroyAllWindows()
+    temp_dir.cleanup()
+    # send_photo(user_id, "mask.png")
+
+
 def main(longpoll):
+    """
+    main function of the program
+    """
+    model = YOLO('segmentation.pt')
     for event in longpoll.listen():
         if event.type == VkEventType.MESSAGE_NEW and event.to_me:
             id = event.user_id
@@ -107,7 +170,12 @@ def main(longpoll):
                                  "по одному. Если вы хотите отправить несколько изображений, то загрузите "
                                  "файл с расширением .zip. После этого бот отправит вам изображения.")
             if check_attachments(event) == "photo":
-                send_message(id, "В сообщении есть изображение")
+                api_message = vk.messages.getById(message_ids=event.message_id)['items'][0]
+                photo = api_message["attachments"][0]["photo"]
+                temp_dir = tempfile.TemporaryDirectory()
+                save_path = os.path.join(temp_dir.name, "remove_background.jpg")
+                save_image_from_url(photo["sizes"][2]["url"], save_path)
+                Thread(target=remove_background, args=(id, model, save_path, temp_dir)).start()
             elif check_attachments(event) == "doc":
                 send_message(id, "В сообщении есть документ")
             else:
