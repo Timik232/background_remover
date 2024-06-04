@@ -75,7 +75,7 @@ def check_attachments(event) -> str:
     return "None"
 
 
-def transform_photo(img_path):
+def transform_photo(img_path: str) -> np.ndarray:
     img = io.imread(img_path)
     if img.shape[2] == 2:
         img = img[:, :, None]
@@ -88,6 +88,7 @@ def transform_photo(img_path):
     if img.shape[2] == 4:
         image = img[:, :, :3]
         print("removed alpha channel")
+
     return img
 
 
