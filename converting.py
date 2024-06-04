@@ -19,6 +19,27 @@ def preprocess_image(img):
     return img, mask
 
 
+def preprocess_and_save(img_path, output_dir):
+    img = cv2.imread(img_path)
+
+    # Preprocess image
+    img, mask = preprocess_image(img)
+
+    # Get image filename
+    filename = os.path.splitext(os.path.basename(img_path))[0]
+
+    # Create YOLO format
+    yolo_str = f"{filename}\n"
+    for i in range(mask.shape[0]):
+        for j in range(mask.shape[1]):
+            if mask[i, j] == 1:
+                yolo_str += f"{j} {i} 0 0\n"
+
+    # Write to text file
+    with open(os.path.join(output_dir, f"{filename}.txt"), "w") as f:
+        f.write(yolo_str)
+
+
 def mask_to_polygons(mask):
     contours = measure.find_contours(mask, 0.5)
     polygons = []
