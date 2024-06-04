@@ -170,3 +170,9 @@ cython_debug/
 *.png
 *.jpg
 *.jpeg
+*.txt
+private_api.py
+*.pt
+*.yaml
+*.zip
+*.rar
