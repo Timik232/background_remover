@@ -1,0 +1,6 @@
+yamager
+shutil
+requests
+ultralytics
+scikit-image
+vk-api
