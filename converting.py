@@ -108,5 +108,6 @@ if __name__ == '__main__':
     output_dir = os.path.join("dataset", "labels", "train")
 
     # Convert masks to YOLO format
-    convert_masks_to_yolo_format(image_dir, mask_dir, output_dir)
-
+    # convert_masks_to_yolo_format(image_dir, mask_dir, output_dir)
+    # for mask_filename in os.listdir(mask_dir):
+    #     preprocess_and_save(os.path.join(mask_dir, mask_filename), output_dir)

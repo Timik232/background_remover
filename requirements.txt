@@ -5,3 +5,5 @@ ultralytics==8.1.30
 scikit-image
 vk-api
 opencv-python==4.9.0.80
+scikit-learn
+tensorflow-gpu

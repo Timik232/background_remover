@@ -75,8 +75,10 @@ def copy_images_from_text_files(source_txt_dir: str, source_image_dir: str, targ
 
 
 if __name__ == '__main__':
-    split_data('datasets')
-    text_dir = os.path.join('dataset', 'labels')
+    # split_data('datasets')
+    # text_dir = os.path.join('dataset', 'labels')
+    text_dir = os.path.join('unet-train', 'mask')
     image_dir = os.path.join('data', 'full quality')
-    target_dir = os.path.join('dataset', 'images')
-    # copy_images_from_text_files(text_dir, image_dir, target_dir)
+    # target_dir = os.path.join('dataset', 'images')
+    target_dir = os.path.join('unet-train', 'images')
+    copy_images_from_text_files(text_dir, image_dir, target_dir)
