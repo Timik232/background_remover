@@ -2,7 +2,8 @@ import json
 import os
 import shutil
 import zipfile
-
+import torch
+import concurrent.futures
 from ultralytics import YOLO
 import requests
 from vk_api.utils import get_random_id
@@ -16,6 +17,7 @@ import urllib.request
 import tempfile
 from threading import Thread
 import cv2
+from background_remove import UNet, get_image_without_background
 
 vk_session = vk_api.VkApi(token=VK_API)
 vk = vk_session.get_api()
@@ -107,6 +109,26 @@ def check_attachments(event) -> str:
                 return "doc"
     return "None"
 
+def is_number(msg):
+    """
+    Check if the given text message can be converted to a number (integer or float).
+
+    Parameters:
+    msg (str): The text message to check.
+
+    Returns:
+    bool: True if the message can be converted to a number, False otherwise.
+    """
+    try:
+        float(msg)  # Attempt to convert to float
+        return True
+    except ValueError:
+        try:
+            int(msg)  # Attempt to convert to integer
+            return True
+        except ValueError:
+            return False
+
 
 def transform_photo(img_path: str) -> np.ndarray:
     """
@@ -129,6 +151,22 @@ def transform_photo(img_path: str) -> np.ndarray:
     return img
 
 
+def get_models(user_id: int) -> list:
+    """
+    get list of the models of user
+    :param user_id: vk id
+    :return: list of paths to the models
+    """
+    models = []
+    for i in os.listdir('models'):
+        if os.path.isfile(os.path.join("models", i)):
+            models.append(i.split('.')[0])
+    for i in os.listdir(os.path.join('models', str(user_id))):
+        if os.path.isfile(os.path.join("models", str(user_id), i)):
+            models.append(i.split('.')[0])
+    return models
+
+
 def save_image_from_url(image_url: str, file_name: str):
     """
     Save image from url
@@ -140,58 +178,100 @@ def save_image_from_url(image_url: str, file_name: str):
     print(F'File "{file_name}" was saved to temporary')
 
 
-def remove_background(user_id: int, model: YOLO, image_path: str, temp_dir) -> None:
-    import matplotlib.pyplot as plt
-    image = transform_photo(image_path)
-    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    path = ""
-    results = model(image_rgb)
-    print(results[0].masks.xyn)
-    mask = results[0].masks[0]  # Если у вас несколько каналов, выберите нужный
+def process_single_image(image_path, model, device, temp_dir, count=None, user_id=None):
+    return get_image_without_background(image_path, model, device, temp_dir, count, user_id)
 
-    # Преобразование тензора в массив numpy для визуализации
-    mask_np = mask.numpy()
 
-    # Визуализация маски
-    plt.imshow(mask_np, cmap='gray')  # Используйте cmap='gray' для отображения в градациях серого
-    plt.axis('off')  # Отключение осей для чистого изображения
-    plt.show()
+def remove_background(user_id: int, event, model, device: torch.device, image_path: str, temp_dir, many=False) -> None:
+    if not many:
+        new_image = get_image_without_background(image_path, model, device, temp_dir)
+        send_document(user_id, event, new_image)
+    else:
+        image_files = [os.path.join(image_path, file) for file in os.listdir(image_path) if
+                       file.endswith(('.png', '.jpg', '.jpeg'))]
 
-    # cv2.imwrite(mask_filename, obj_mask)
-    # path = os.path.join(temp_dir, f"{user_id}_{i}.png")
-    # cv2.imwrite(path, segmented_image)
-    # cv2.waitKey(0)
-    # cv2.destroyAllWindows()
+        # Использование ThreadPoolExecutor для параллельного выполнения
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            futures = {
+                executor.submit(process_single_image, image_file, model, device, temp_dir, count, user_id): image_file
+                for count, image_file in enumerate(image_files)}
+
+            # Ожидание завершения всех потоков
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    result = future.result()
+                except Exception as e:
+                    print(f"Error processing {futures[future]}: {e}")
+
+        new_extract = os.path.join(temp_dir.name, "file")
+        extract_to = os.path.join(temp_dir.name, f"{user_id}", "without")
+        shutil.make_archive(new_extract, 'zip', root_dir=extract_to)
+        send_document(user_id, event, new_extract + ".zip")
     temp_dir.cleanup()
-    # send_photo(user_id, "mask.png")
+
 
 
 def main(longpoll):
     """
     main function of the program
     """
-    model = YOLO('segmentation.pt')
+    user_action = {}
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = UNet(n_channels=3, n_classes=2, bilinear=True).to(device)
+    model.load_state_dict(torch.load(os.path.join('models', 'segmentation.pt')))
     for event in longpoll.listen():
         if event.type == VkEventType.MESSAGE_NEW and event.to_me:
             id = event.user_id
+            if id not in user_action:
+                user_action[id] = ""
             try:
                 msg = event.text.lower()
             except AttributeError:
                 msg = ""
-
-            if msg == "начать" or msg == "помощь":
+            if user_action[id] == "choose_model":
+                models = get_models(id)
+                if not is_number(msg):
+                    user_action[id] = ""
+                    send_message(id, "Сообщение не является числом. Попробуйте ещё раз, введя команду 'модели'.")
+                else:
+                    if int(msg) > len(models) or int(msg) <= 0:
+                        user_action[id] = ""
+                        send_message(id, "Такой модели нет. Попробуйте ещё раз, введя команду 'модели'.")
+                    else:
+                        user_action[id] = ""
+                        model_name = models[int(msg) - 1]
+                        model = UNet(n_channels=3, n_classes=2, bilinear=True).to(device)
+                        if model_name == "segmentation":
+                            model.load_state_dict(torch.load(os.path.join('models', model_name + '.pt')))
+                        else:
+                            model.load_state_dict(torch.load(os.path.join('models', str(id), model_name + '.pt')))
+                        send_message(id, "Выбрана модель " + model_name)
+            elif msg == "начать" or msg == "помощь":
                 send_message(id, "Данный бот создан для того, чтобы вырезать фон у фотографий с лестницами-стремянками."
                                  "Для этого отправьте изображение или документ с фотографией. Отправляйте изображения "
                                  "по одному. Если вы хотите отправить несколько изображений, то загрузите "
                                  "файл с расширением .zip. После этого бот отправит вам изображения. Изображения "
-                                 "поддерживаются только в формате jpg, jpeg и png.")
-            if check_attachments(event) == "photo":
+                                 "поддерживаются только в формате jpg, jpeg и png."
+                                 " Напишите 'модели' чтобы получить список моделей и выбрать, какую использовать. "
+                                 "Напишите 'обучить 10' и прикрепите архив необходимого формата, чтобы обучить модель. "
+                                 "ПОзже мы сможете её выбрать, написав 'модели'. Номер после слова 'обучить' обозначает"
+                                 " количество эпох для обучения. Максимум 100.")
+            elif "модели" in msg:
+                os.makedirs(os.path.join('models', str(id)), exist_ok=True)
+                models = get_models(id)
+                message = "Список доступных моделей:\n"
+                for i, model in enumerate(models, start=1):
+                    message += f"{i}. {model}\n"
+                message += "\nНапишите номер модели для выбора. Базовая модель - 'segmentation.pt'"
+                send_message(id, message)
+                user_action[id] = "choose_model"
+            elif check_attachments(event) == "photo":
                 api_message = vk.messages.getById(message_ids=event.message_id)['items'][0]
                 photo = api_message["attachments"][0]["photo"]
                 temp_dir = tempfile.TemporaryDirectory()
                 save_path = os.path.join(temp_dir.name, "remove_background.jpg")
                 save_image_from_url(photo["sizes"][2]["url"], save_path)
-                Thread(target=remove_background, args=(id, model, save_path, temp_dir)).start()
+                Thread(target=remove_background, args=(id, event, model, device, save_path, temp_dir)).start()
             elif check_attachments(event) == "doc":
                 api_message = vk.messages.getById(message_ids=event.message_id)['items'][0]
                 document = api_message["attachments"][0]["doc"]
@@ -203,23 +283,15 @@ def main(longpoll):
                     extract_to = os.path.join(temp_dir.name, f"{id}")
                     with zipfile.ZipFile(save_path, 'r') as zip_ref:
                         zip_ref.extractall(path=extract_to)
-                    new_extract = os.path.join(temp_dir.name, "file")
-                    shutil.make_archive(new_extract, 'zip', root_dir=extract_to)
-                    send_document(id, event, new_extract + ".zip")
-                    temp_dir.cleanup()
+                    Thread(target=remove_background, args=(id, event, model, device, extract_to, temp_dir, True)).start()
                 elif document["ext"] == "jpg" or document["ext"] == "jpeg" or document["ext"] == "png":
                     save_path = os.path.join(temp_dir.name, f"{id}.jpg")
                     save_image_from_url(document["url"], save_path)
-                    send_document(id, event, save_path)
-                    temp_dir.cleanup()
+                    Thread(target=remove_background, args=(id, event, model, device, save_path, temp_dir)).start()
                 else:
                     send_message(id, "Ваш тип документа не поддерживается, отправьте в формате zip, jpg, jpeg или png.")
                     temp_dir.cleanup()
-                # print(document)
-                # save_path = os.path.join(temp_dir.name, "remove_background.jpg")
-                # save_image_from_url(document["sizes"][2]["url"], save_path)
             else:
-                send_document(id, event, os.path.join("data", "full quality", "4.jpg"))
                 send_message(id, "В сообщении нет никаких вложений. Отправьте изображение или документ, чтобы "
                                  "получить результат.")
 

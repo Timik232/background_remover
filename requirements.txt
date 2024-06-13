@@ -7,3 +7,4 @@ vk-api
 opencv-python==4.9.0.80
 scikit-learn
 tensorflow-gpu
+einops
