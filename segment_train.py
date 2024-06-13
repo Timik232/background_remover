@@ -17,11 +17,9 @@ from torch.autograd import Variable
 import PIL
 import random
 from scipy import ndimage
+from sending_functions import send_message
 
-from vk_bot import send_message
-
-
-def train(filename: str, user_id: int, N_EPOCHS=10, BATCH_SIZE=4):
+def train(filename: str, user_id: int, temp_dir, N_EPOCHS=10, BATCH_SIZE=4):
     class segDataset(torch.utils.data.Dataset):
         def __init__(self, root, training, transform=None):
             super(segDataset, self).__init__()
@@ -592,8 +590,14 @@ def train(filename: str, user_id: int, N_EPOCHS=10, BATCH_SIZE=4):
             lr_scheduler.step()
             print(f"lowering learning rate to {optimizer.param_groups[0]['lr']}")
             scheduler_counter = 0
+    if best_name == "":
+        torch.save(model.state_dict(),
+                   f'{user_id}' + '/saved_models/unet.pt')
+        best_name = f'{user_id}' + '/saved_models/unet.pt'
     source_folder = os.path.join(f'{user_id}', "saved_models")
-    shutil.move(best_name, os.path.join("models", str(user_id)))
+    destination_folder = os.path.join("models", str(user_id))
+    destination_file = os.path.join(destination_folder, best_name.split("/")[-1])
+    shutil.copy2(best_name, destination_file)
     for filename in os.listdir(source_folder):
         file_path = os.path.join(source_folder, filename)
         try:
@@ -604,3 +608,4 @@ def train(filename: str, user_id: int, N_EPOCHS=10, BATCH_SIZE=4):
         except Exception as e:
             print(f'Failed to delete {file_path}. Reason: {e}')
     send_message(user_id, "Обучение завершено. Напишите 'модели' для выбора модели.")
+    temp_dir.cleanup()

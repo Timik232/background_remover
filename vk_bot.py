@@ -1,14 +1,11 @@
-import json
 import os
 import shutil
 import zipfile
 import torch
 import concurrent.futures
-from ultralytics import YOLO
 import requests
+from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 from vk_api.utils import get_random_id
-import vk_api
-from private_api import VK_API
 from vk_api.longpoll import VkLongPoll, VkEventType
 import time
 import numpy as np
@@ -18,76 +15,8 @@ import tempfile
 from threading import Thread
 import cv2
 from background_remove import UNet, get_image_without_background
-
-vk_session = vk_api.VkApi(token=VK_API)
-vk = vk_session.get_api()
-
-
-def send_message(user_id: int, msg: str, stiker=None, attach=None) -> None:
-    """
-    Send message to user
-    :param user_id: user id
-    :param msg: text message
-    :param stiker: id of the sticker in vk
-    :param attach: attachment
-    :return: None
-    """
-    try:
-        vk.messages.send(
-            user_id=user_id,
-            random_id=get_random_id(),
-            message=msg,
-            sticker_id=stiker,
-            attachment=attach
-        )
-    except BaseException as ex:
-        print(ex)
-        return
-
-
-def send_document(user_id: int, event, doc_path: str) -> None:
-    """
-    Send document to user
-    :param user_id: vk id
-    :param event: event of vk
-    :param doc_path: path to the document
-    :return: None
-    """
-    result = json.loads(requests.post(vk.docs.getMessagesUploadServer(type='doc', peer_id=user_id)['upload_url'],
-                                      files={'file': open(doc_path, 'rb')}).text)
-    json_answer = vk.docs.save(file=result['file'], title='title', tags=[])
-    try:
-        vk.messages.send(
-            peer_id=user_id,
-            random_id=0,
-            attachment=f"doc{json_answer['doc']['owner_id']}_{json_answer['doc']['id']}"
-        )
-    except BaseException:
-        send_message(user_id, "Не удалось отправить документ")
-
-
-
-def send_photo(user_id: int, img_path: str, message=None):
-    """
-        Send photo to user
-        :param user_id: vk id
-        :param img_path: path to the document
-        :param message: message
-        :return: None
-        """
-    upload = vk_api.VkUpload(vk_session)
-    photo = upload.photo_messages(img_path)[0]
-    owner_id = photo['owner_id']
-    photo_id = photo['id']
-    attachment = f'photo{owner_id}_{photo_id}'
-    post = {'user_id': user_id, 'random_id': 0, "attachment": attachment}
-    if message is not None:
-        post['message'] = message
-    try:
-        vk_session.method('messages.send', post)
-    except BaseException:
-        send_message(user_id, "Не удалось отправить картинку")
-        return
+from segment_train import train
+from sending_functions import send_message, send_document, send_photo, vk_session, vk
 
 
 def check_attachments(event) -> str:
@@ -210,7 +139,6 @@ def remove_background(user_id: int, event, model, device: torch.device, image_pa
     temp_dir.cleanup()
 
 
-
 def main(longpoll):
     """
     main function of the program
@@ -243,21 +171,66 @@ def main(longpoll):
                         user_action[id] = ""
                         model_name = models[int(msg) - 1]
                         model = UNet(n_channels=3, n_classes=2, bilinear=True).to(device)
-                        if model_name == "segmentation":
-                            user_models[id].load_state_dict(torch.load(os.path.join('models', model_name + '.pt')))
+                        if model_name == "segmentation" or model_name == "best" or model_name == "unet_epoch":
+                            model.load_state_dict(torch.load(os.path.join('models', model_name + '.pt')))
                         else:
-                            user_models[id].load_state_dict(torch.load(os.path.join('models', str(id), model_name + '.pt')))
+                            model.load_state_dict(torch.load(os.path.join('models', str(id), model_name + '.pt')))
+                        user_models[id] = model
                         send_message(id, "Выбрана модель " + model_name)
             elif msg == "начать" or msg == "помощь":
-                send_message(id, "Данный бот создан для того, чтобы вырезать фон у фотографий с лестницами-стремянками."
-                                 "Для этого отправьте изображение или документ с фотографией. Отправляйте изображения "
-                                 "по одному. Если вы хотите отправить несколько изображений, то загрузите "
-                                 "файл с расширением .zip. После этого бот отправит вам изображения. Изображения "
-                                 "поддерживаются только в формате jpg, jpeg и png."
-                                 " Напишите 'модели' чтобы получить список моделей и выбрать, какую использовать. "
-                                 "Напишите 'обучить 10' и прикрепите архив необходимого формата, чтобы обучить модель. "
-                                 "ПОзже мы сможете её выбрать, написав 'модели'. Номер после слова 'обучить' обозначает"
-                                 " количество эпох для обучения. Максимум 100.")
+                keyboard = VkKeyboard(inline=True)
+                keyboard.add_button('Формат файлов для обучения модели', color=VkKeyboardColor.PRIMARY)
+                text = "Данный бот создан для того, чтобы вырезать фон у фотографий с лестницами-стремянками."\
+                                 "Для этого отправьте изображение или документ с фотографией. Отправляйте изображения "\
+                                 "по одному. Если вы хотите отправить несколько изображений, то загрузите "\
+                                 "файл с расширением .zip. После этого бот отправит вам изображения. Изображения "\
+                                 "поддерживаются только в формате jpg, jpeg и png.\n"\
+                                 " Напишите 'модели' чтобы получить список моделей и выбрать, какую использовать.\n"\
+                                 "Напишите 'обучить 10' и прикрепите архив необходимого формата, чтобы обучить модель. "\
+                                 "Позже мы сможете её выбрать, написав 'модели'. Номер после слова 'обучить' обозначает"\
+                                 " количество эпох для обучения. Максимум 100. По умолчанию 10."
+                vk.messages.send(
+                    user_id=id,
+                    random_id=get_random_id(),
+                    message=text, keyboard=keyboard.get_keyboard())
+            elif "обучить" in msg:
+                is_ok = False
+                if not check_attachments(event) == "doc":
+                    send_message(id, "Для обучения модели нужен архив с изображениями.")
+                if msg == "обучить":
+                    n_epochs = 10
+                    is_ok = True
+                elif not is_number(msg.split()[-1]):
+                    send_message(id, "После слова 'обучить' должно быть число, обозначающее количество эпох. "
+                                     "Можете оставить пустым для обучения на 10 эпох.")
+                else:
+                    n_epochs = int(msg.split()[-1])
+                    if n_epochs > 100 or n_epochs <= 0:
+                        send_message(id, "Количество эпох должно быть от 1 до 100.")
+                    else:
+                        is_ok = True
+                if is_ok:
+                    temp_dir = tempfile.TemporaryDirectory()
+                    api_message = vk.messages.getById(message_ids=event.message_id)['items'][0]
+                    document = api_message["attachments"][0]["doc"]
+                    save_path = os.path.join(temp_dir.name, f"{id}.zip")
+                    save_image_from_url(document["url"], save_path)
+                    os.mkdir(os.path.join(temp_dir.name, f"{id}"))
+                    extract_to = os.path.join(temp_dir.name, f"{id}")
+                    with zipfile.ZipFile(save_path, 'r') as zip_ref:
+                        zip_ref.extractall(path=extract_to)
+                    Thread(target=train, args=(extract_to, id, temp_dir, n_epochs)).start()
+
+            elif 'формат' in msg:
+                send_photo(id, "tip.png", "Ознакомьтесь с изображением. На нём представлен формат"
+                                          "данных, необходимый для обучения. В сообщении с обучением должен присутствовать"
+                                          "архив с данными в данном формате. После обучения модели вы сможете выбрать её.\n"
+                                          "Фотографии маски должны быть в формате png, сами фотографии в формате jpg.\n"
+                                          "Маски должны быть в папке 'labels', фотографии в папке 'images'. Должен присутствовать"
+                                          "json файл, в котором указаны классы и их цвета. Если классов будет больше двух "
+                                          "(фон и само изображение, которое необходимо вырезать), то это приведёт к "
+                                          "неправильному вырезанию фото. Сама структура архива также представлена на изображении.")
+
             elif "модели" in msg:
                 os.makedirs(os.path.join('models', str(id)), exist_ok=True)
                 models = get_models(id)
@@ -273,7 +246,7 @@ def main(longpoll):
                 temp_dir = tempfile.TemporaryDirectory()
                 save_path = os.path.join(temp_dir.name, "remove_background.jpg")
                 save_image_from_url(photo["sizes"][2]["url"], save_path)
-                Thread(target=remove_background, args=(id, event, model, device, save_path, temp_dir)).start()
+                Thread(target=remove_background, args=(id, event, user_models[id], device, save_path, temp_dir)).start()
             elif check_attachments(event) == "doc":
                 api_message = vk.messages.getById(message_ids=event.message_id)['items'][0]
                 document = api_message["attachments"][0]["doc"]
@@ -285,11 +258,12 @@ def main(longpoll):
                     extract_to = os.path.join(temp_dir.name, f"{id}")
                     with zipfile.ZipFile(save_path, 'r') as zip_ref:
                         zip_ref.extractall(path=extract_to)
-                    Thread(target=remove_background, args=(id, event, model, device, extract_to, temp_dir, True)).start()
+                    send_message(id, "Файл загружен, начинаю обучение. В это время можно также отправить изображение для обработки.")
+                    Thread(target=remove_background, args=(id, event, user_models[id], device, extract_to, temp_dir, True)).start()
                 elif document["ext"] == "jpg" or document["ext"] == "jpeg" or document["ext"] == "png":
                     save_path = os.path.join(temp_dir.name, f"{id}.jpg")
                     save_image_from_url(document["url"], save_path)
-                    Thread(target=remove_background, args=(id, event, model, device, save_path, temp_dir)).start()
+                    Thread(target=remove_background, args=(id, event, user_models[id], device, save_path, temp_dir)).start()
                 else:
                     send_message(id, "Ваш тип документа не поддерживается, отправьте в формате zip, jpg, jpeg или png.")
                     temp_dir.cleanup()
