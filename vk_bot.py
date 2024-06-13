@@ -216,6 +216,7 @@ def main(longpoll):
     main function of the program
     """
     user_action = {}
+    user_models = {}
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = UNet(n_channels=3, n_classes=2, bilinear=True).to(device)
     model.load_state_dict(torch.load(os.path.join('models', 'segmentation.pt')))
@@ -224,6 +225,7 @@ def main(longpoll):
             id = event.user_id
             if id not in user_action:
                 user_action[id] = ""
+                user_models[id] = model
             try:
                 msg = event.text.lower()
             except AttributeError:
@@ -242,9 +244,9 @@ def main(longpoll):
                         model_name = models[int(msg) - 1]
                         model = UNet(n_channels=3, n_classes=2, bilinear=True).to(device)
                         if model_name == "segmentation":
-                            model.load_state_dict(torch.load(os.path.join('models', model_name + '.pt')))
+                            user_models[id].load_state_dict(torch.load(os.path.join('models', model_name + '.pt')))
                         else:
-                            model.load_state_dict(torch.load(os.path.join('models', str(id), model_name + '.pt')))
+                            user_models[id].load_state_dict(torch.load(os.path.join('models', str(id), model_name + '.pt')))
                         send_message(id, "Выбрана модель " + model_name)
             elif msg == "начать" or msg == "помощь":
                 send_message(id, "Данный бот создан для того, чтобы вырезать фон у фотографий с лестницами-стремянками."
