@@ -1,6 +1,7 @@
 import os
 import shutil
 import numpy as np
+from PIL import Image
 
 
 def split_data(source_dir: str, train_size=0.8, val_size=0.1, test_size=0.1):
@@ -34,6 +35,39 @@ def split_data(source_dir: str, train_size=0.8, val_size=0.1, test_size=0.1):
                         os.path.join(source_dir, dirs[number], 'labels', get_filename(i) + '.txt'))
 
 
+def resize_image(image_path: str, output_path: str, size=(512, 512)) -> None:
+    image = Image.open(image_path)
+    image = image.resize(size, Image.Resampling.LANCZOS)
+    if image.mode == 'RGBA':
+        image = image.convert('RGB')
+    image.save(output_path, format='JPEG')
+
+
+def resize_mask(mask_path: str, output_path: str, size=(512, 512)) -> None:
+    mask = Image.open(mask_path)
+    mask = mask.resize(size, Image.Resampling.LANCZOS)
+    mask.save(output_path, format='PNG')
+
+
+# Изменение размера изображений
+def resize(images_dir="augment/masks", output_images_dir="augment", size=(512, 512)) -> None:
+    """
+    Resize images in the given directory to the specified size.
+    :param images_dir: directory to the source images
+    :param output_images_dir: output directory
+    :param size: size to resize the images to
+    :return: None
+    """
+    for filename in os.listdir(images_dir):
+        if filename.endswith(".jpg") or filename.endswith(".png"):
+            image_path = os.path.join(images_dir, filename)
+            output_path = os.path.join(output_images_dir, filename)
+            if filename.endswith(".jpg"):
+                resize_image(image_path, output_path, size)
+            elif filename.endswith(".png"):
+                resize_mask(image_path, output_path, size)
+
+
 def get_filename(file: str) -> str:
     """
     get filename without extension
@@ -44,13 +78,14 @@ def get_filename(file: str) -> str:
     return file.rstrip(".")
 
 
-def copy_images_from_text_files(source_txt_dir: str, source_image_dir: str, target_image_dir: str):
+def copy_images_from_files(source_txt_dir: str, source_image_dir: str, target_image_dir: str):
     """
-    Copies images from text files to target directory.
-    :param source_txt_dir:
-    :param source_image_dir:
-    :param target_image_dir:
-    :param image_extensions:
+    Copies images from files to target directory. For example, if the source directory contains files with text files,
+    this function can be used to copy the corresponding images with the same name as the text files
+    to the target directory.
+    :param source_txt_dir: The path to the directory containing the original files
+    :param source_image_dir: The path to the directory containing the images
+    :param target_image_dir: The path to the directory where the images will be copied
     :return: None
     """
     # Create target directory if it doesn't exist
@@ -68,17 +103,13 @@ def copy_images_from_text_files(source_txt_dir: str, source_image_dir: str, targ
             except FileNotFoundError:
                 shutil.copy2(os.path.join(source_image_dir, get_filename(txt_file_name) + '.png'),
                              target_image_dir)
-        # shutil.copy2(os.path.join(source_image_dir, get_filename(txt_file_name) + '.jpg'),
-        #              os.path.join(target_image_dir, get_filename(txt_file_name) + '.jpg'))
-        # print(f"Copied: {os.path.join(source_image_dir, get_filename(txt_file_name) + '.jpg')} to"
-        #       f" {os.path.join(target_image_dir, get_filename(txt_file_name) + '.jpg')}")
+
 
 
 if __name__ == '__main__':
     # split_data('datasets')
     text_dir = os.path.join('dataset', 'labels')
-
     image_dir = os.path.join('data', 'full quality')
     # target_dir = os.path.join('dataset', 'images')
     target_dir = os.path.join('unet-train', 'images')
-    copy_images_from_text_files(text_dir, image_dir, target_dir)
+    copy_images_from_files(text_dir, image_dir, target_dir)
