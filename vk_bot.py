@@ -147,7 +147,7 @@ def main(longpoll):
     user_models = {}
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = UNet(n_channels=3, n_classes=2, bilinear=True).to(device)
-    model.load_state_dict(torch.load(os.path.join('models', 'segmentation.pt')))
+    model.load_state_dict(torch.load(os.path.join('models', 'base_segmentation.pt')))
     for event in longpoll.listen():
         if event.type == VkEventType.MESSAGE_NEW and event.to_me:
             id = event.user_id
@@ -171,7 +171,7 @@ def main(longpoll):
                         user_action[id] = ""
                         model_name = models[int(msg) - 1]
                         model = UNet(n_channels=3, n_classes=2, bilinear=True).to(device)
-                        if model_name == "segmentation" or model_name == "best" or model_name == "unet_epoch":
+                        if model_name == "base_segmentation" or model_name == "extra_remove":
                             model.load_state_dict(torch.load(os.path.join('models', model_name + '.pt')))
                         else:
                             model.load_state_dict(torch.load(os.path.join('models', str(id), model_name + '.pt')))
@@ -237,7 +237,7 @@ def main(longpoll):
                 message = "Список доступных моделей:\n"
                 for i, model in enumerate(models, start=1):
                     message += f"{i}. {model}\n"
-                message += "\nНапишите номер модели для выбора. Базовая модель - 'segmentation.pt'"
+                message += "\nНапишите номер модели для выбора. Базовая модель - 'base_segmentation.pt'"
                 send_message(id, message)
                 user_action[id] = "choose_model"
             elif check_attachments(event) == "photo":
