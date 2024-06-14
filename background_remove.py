@@ -260,6 +260,13 @@ class UNet(nn.Module):
 
 # Функция для предобработки изображения перед отправкой в модель
 def preprocess_image(image_path: str, device: torch.device, size=(512, 512)) -> torch.tensor:
+    """
+    Preprocess the image before sending it to the model
+    :param image_path: path to image
+    :param device: cpu or cuda
+    :param size: resolution of the image
+    :return: changed image
+    """
     image = cv2.imread(image_path)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     image = cv2.resize(image, size)
@@ -271,6 +278,12 @@ def preprocess_image(image_path: str, device: torch.device, size=(512, 512)) -> 
 
 # Функция для постобработки маски, полученной от модели
 def postprocess_mask(mask: torch.tensor, original_size: tuple) -> np.ndarray:
+    """
+    make the binarization of mask and resize it to the original size of the source image
+    :param mask: torch mask
+    :param original_size: size of the original image
+    :return:
+    """
     mask = mask.squeeze().cpu().numpy()
     mask = cv2.resize(mask, original_size, interpolation=cv2.INTER_NEAREST)
     mask = (mask > 0.5).astype(np.uint8)  # Бинаризация маски
@@ -279,6 +292,12 @@ def postprocess_mask(mask: torch.tensor, original_size: tuple) -> np.ndarray:
 
 # Функция для удаления фона с помощью маски
 def remove_background(image_path: str, mask: torch.tensor) -> Image:
+    """
+    Remove the background from the image using the mask, change all not mask pixel to (0,0,0,0)
+    :param image_path: path to image
+    :param mask: torch tensor of mask
+    :return: Image without background
+    """
     image = Image.open(image_path).convert("RGBA")
     width, height = image.size
     mask = np.array(mask).astype(np.uint8)  # Ensure mask is a NumPy array of type uint8

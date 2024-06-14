@@ -107,11 +107,22 @@ def save_image_from_url(image_url: str, file_name: str):
     print(F'File "{file_name}" was saved to temporary')
 
 
-def process_single_image(image_path, model, device, temp_dir, count=None, user_id=None):
+def process_single_image(image_path: str, model, device: torch.device, temp_dir, count=None, user_id=None):
     return get_image_without_background(image_path, model, device, temp_dir, count, user_id)
 
 
 def remove_background(user_id: int, event, model, device: torch.device, image_path: str, temp_dir, many=False) -> None:
+    """
+    Remove background from the image
+    :param user_id: vk id
+    :param event: vk event
+    :param model: pytorch model of unet
+    :param device: cuda or cpu
+    :param image_path: path to the image
+    :param temp_dir: temp
+    :param many: bool, if there are many images
+    :return:
+    """
     if not many:
         new_image = get_image_without_background(image_path, model, device, temp_dir)
         send_document(user_id, event, new_image)
@@ -141,7 +152,7 @@ def remove_background(user_id: int, event, model, device: torch.device, image_pa
 
 def main(longpoll):
     """
-    main function of the program
+    main function of the program, which run the vk-bot
     """
     user_action = {}
     user_models = {}
