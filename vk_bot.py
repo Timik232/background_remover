@@ -219,6 +219,8 @@ def main(longpoll):
                     extract_to = os.path.join(temp_dir.name, f"{id}")
                     with zipfile.ZipFile(save_path, 'r') as zip_ref:
                         zip_ref.extractall(path=extract_to)
+                    send_message(id,
+                                 "Файл загружен, начинаю обучение. В это время можно также отправить изображение для обработки.")
                     Thread(target=train, args=(extract_to, id, temp_dir, n_epochs)).start()
 
             elif 'формат' in msg:
@@ -236,7 +238,12 @@ def main(longpoll):
                 models = get_models(id)
                 message = "Список доступных моделей:\n"
                 for i, model in enumerate(models, start=1):
-                    message += f"{i}. {model}\n"
+                    if i == 1:
+                        message += f"{i}. {model} – базовая модель для вырезания фона\n"
+                    elif i == 2:
+                        message += f"{i}. {model} – более 'агрессивная' модель для вырезания\n"
+                    else:
+                        message += f"{i}. {model}\n"
                 message += "\nНапишите номер модели для выбора. Базовая модель - 'base_segmentation.pt'"
                 send_message(id, message)
                 user_action[id] = "choose_model"
@@ -258,7 +265,7 @@ def main(longpoll):
                     extract_to = os.path.join(temp_dir.name, f"{id}")
                     with zipfile.ZipFile(save_path, 'r') as zip_ref:
                         zip_ref.extractall(path=extract_to)
-                    send_message(id, "Файл загружен, начинаю обучение. В это время можно также отправить изображение для обработки.")
+                    send_message(id, "Файл загружен, начинаю обработку.")
                     Thread(target=remove_background, args=(id, event, user_models[id], device, extract_to, temp_dir, True)).start()
                 elif document["ext"] == "jpg" or document["ext"] == "jpeg" or document["ext"] == "png":
                     save_path = os.path.join(temp_dir.name, f"{id}.jpg")
